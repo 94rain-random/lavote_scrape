@@ -24,6 +24,12 @@
 
     /* ── Contest list ── */
     .contest-group.hidden { display: none; }
+    .contest-tier.hidden { display: none; }
+    .tier-header { padding: 18px 16px 2px; border-top: 1px solid #1e1e30; }
+    .tier-header:first-child { border-top: none; padding-top: 10px; }
+    .tier-header h2 { margin: 0; font-size: 0.92rem; font-weight: 600; color: #94a3b8; }
+    .tier-header p { margin: 4px 0 0; font-size: 0.78rem; line-height: 1.4; color: #d97706; }
+    .multi-county-warning { margin: 12px 16px 0; padding: 10px 14px; background: #2a1d08; border: 1px solid #92400e; border-left: 4px solid #f59e0b; border-radius: 6px; color: #fcd34d; font-size: 0.85rem; line-height: 1.45; }
     .group-header { padding: 10px 16px 3px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569; }
     .contest-row { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid #141420; cursor: pointer; gap: 10px; min-height: 52px; text-decoration: none; color: inherit; }
     .contest-row:hover { background: #15152a; }
@@ -95,6 +101,8 @@
       .site-header { padding: 12px 24px; }
       .search-wrap { padding: 10px 24px; }
       .group-header { padding: 10px 24px 3px; }
+      .tier-header { padding: 18px 24px 2px; }
+      .multi-county-warning { margin: 12px 24px 0; }
       .contest-row { padding: 10px 24px; }
       .detail-header { padding: 11px 24px; }
       .chart-section { padding: 16px 24px 0; }
@@ -254,6 +262,53 @@ async function loadIndex() {
   state.index = await resp.json();
 }
 
+// ─────────────────────────── Multi-county contests ───────────────
+// LA County only reports votes cast inside LA County. For contests whose
+// electorate extends into neighbouring counties, these numbers are a partial
+// count and the leader shown here may not be the overall leader.
+//
+// Sources: CA Secretary of State "Offices and Subdivisions" tables (counties
+// within each district) for the 2021 legislative maps and the Prop 50
+// congressional map; LA County RR/CC district schedule for local districts
+// it marks as shared with another county.
+const STATEWIDE_GROUPS = new Set([
+  'President', 'United States Senator', 'Governor', 'Lieutenant Governor',
+  'Secretary of State', 'Controller', 'Treasurer', 'Attorney General',
+  'Insurance Commissioner', 'Superintendent Public Inst',
+  'Supreme Court Justices', 'Appellate Court Justices', 'State Measures',
+]);
+const MULTI_COUNTY_DISTRICTS = {
+  // Congressional districts: 2021 map (2022–2024) vs Prop 50 map (2026–2030).
+  congress2021:   new Set([23, 26, 28, 32, 35, 38, 45]),
+  congressProp50: new Set([23, 26, 28, 31, 32, 35, 38, 41, 42, 45]),
+  senate:         new Set([22, 23, 25, 27, 30, 34, 36]),
+  assembly:       new Set([34, 39, 41, 42, 46, 53, 64, 67]),
+};
+const MULTI_COUNTY_LOCAL = [
+  /WRIGHTWOOD COMMUNITY SERVICES/, /ANTELOPE VALLEY-EAST KERN/,
+  /SANTA CLARITA VALLEY WATER/, /NORTH ORANGE COUNTY COMMUNITY COLLEGE/,
+  /VICTOR VALLEY COMMUNITY COLLEGE/, /LAS VIRGENES UNIFIED/, /ROWLAND UNIFIED/,
+  /SNOWLINE JOINT/, /FULLERTON JOINT/, /GORMAN JOINT/, /LOWELL JOINT/,
+];
+
+function isMultiCounty(contest, electionDate) {
+  const g = contest.groupName;
+  if (STATEWIDE_GROUPS.has(g)) return true;
+  const m = contest.title.match(/(\d+)(?:st|nd|rd|th) District/i);
+  const n = m ? parseInt(m[1]) : NaN;
+  if (g === 'U.S. Representative') {
+    const map = (electionDate || '') >= '2026' ? 'congressProp50' : 'congress2021';
+    return MULTI_COUNTY_DISTRICTS[map].has(n);
+  }
+  if (g === 'State Senator') return MULTI_COUNTY_DISTRICTS.senate.has(n);
+  if (g === 'Member of the Assembly') return MULTI_COUNTY_DISTRICTS.assembly.has(n);
+  return MULTI_COUNTY_LOCAL.some(re => re.test(contest.title));
+}
+
+const MULTI_COUNTY_TIER_NOTE =
+  'Only votes cast in Los Angeles County are reported here. These are partial counts, ' +
+  'and the leader shown may not be the overall leader.';
+
 function buildLookups(meta) {
   const candidateById = new Map();
   const contestById   = new Map();
@@ -329,6 +384,9 @@ async function loadElection(eid) {
   ]);
 
   const { candidateById, contestById, groupOrder } = buildLookups(meta);
+  for (const contest of contestById.values()) {
+    contest.multiCounty = isMultiCounty(contest, entry.election_date);
+  }
   const series = buildTimeSeries(entry.result_files, resultResps, contestById);
 
   state.elections[eid] = { candidateById, contestById, groupOrder, series,
@@ -543,7 +601,30 @@ function renderIndex() {
   const list = document.getElementById('contest-list');
   list.innerHTML = '';
 
+  // Tier 1: contests entirely within LA County. Tier 2: contests that also
+  // collect votes in other counties (LA's numbers are a partial count).
+  const tiers = [
+    { title: 'Los Angeles County contests', note: '', groups: [] },
+    { title: 'Contests extending beyond Los Angeles County', note: MULTI_COUNTY_TIER_NOTE, groups: [] },
+  ];
   for (const group of el.groupOrder) {
+    const local = group.contestIds.filter(id => !el.contestById.get(id).multiCounty);
+    const multi = group.contestIds.filter(id =>  el.contestById.get(id).multiCounty);
+    if (local.length) tiers[0].groups.push({ name: group.name, contestIds: local });
+    if (multi.length) tiers[1].groups.push({ name: group.name, contestIds: multi });
+  }
+
+  for (const tier of tiers) {
+    if (!tier.groups.length) continue;
+    const tierEl = document.createElement('div');
+    tierEl.className = 'contest-tier';
+    const tierHeader = document.createElement('div');
+    tierHeader.className = 'tier-header';
+    tierHeader.innerHTML = `<h2>${escHtml(tier.title)}</h2>` +
+      (tier.note ? `<p>${escHtml(tier.note)}</p>` : '');
+    tierEl.appendChild(tierHeader);
+
+  for (const group of tier.groups) {
     const section = document.createElement('section');
     section.className = 'contest-group';
     section.dataset.group = group.name;
@@ -585,7 +666,10 @@ function renderIndex() {
       }
     }
 
-    list.appendChild(section);
+    tierEl.appendChild(section);
+  }
+
+    list.appendChild(tierEl);
   }
 
   const q = document.getElementById('search-input').value;
@@ -639,6 +723,12 @@ function renderDetail(eid, contestId) {
 
   document.getElementById('detail-body').innerHTML = `
     <div id="detail-view">
+      ${contest.multiCounty ? `
+      <div class="multi-county-warning" role="note">
+        <strong>Partial results.</strong> This contest extends beyond Los Angeles County.
+        Only votes cast in Los Angeles County are shown here; votes from other counties
+        are not included, and the leader shown may not be the overall leader.
+      </div>` : ''}
       <div class="charts-container">
         <div class="chart-section" id="totals-section">
           <h3>Current Totals</h3>
@@ -1150,6 +1240,11 @@ function filterContests(query) {
     const anyVisible = [...group.querySelectorAll('.contest-row')]
       .some(r => !r.classList.contains('hidden'));
     group.classList.toggle('hidden', !anyVisible);
+  });
+  document.querySelectorAll('.contest-tier').forEach(tier => {
+    const anyVisible = [...tier.querySelectorAll('.contest-group')]
+      .some(g => !g.classList.contains('hidden'));
+    tier.classList.toggle('hidden', !anyVisible);
   });
 }
 
