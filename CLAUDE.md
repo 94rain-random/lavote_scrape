@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A single-script Python tool that polls LA County election results from `results.lavote.gov` and saves snapshots as JSON files. Results files are named `{eid}_{datetime}.json` and committed directly to the repo root. A GitHub Actions workflow runs hourly, cancels the previous run, and self-exits after ~65 min via `--max-runtime`.
+A single-script Python tool that polls LA County election results from `results.lavote.gov` and saves snapshots as JSON files. Results files are named `{eid}_{datetime}.json` and committed under `data/{eid}/`, alongside the election metadata file `data/{eid}/election_{eid}.json`. A GitHub Actions workflow runs hourly, cancels the previous run, and self-exits after ~65 min via `--max-runtime`.
 
 ## Commands
 
@@ -25,7 +25,7 @@ There are no tests or linting commands in this project.
 
 All logic lives in `lavote_scrape/scrape.py`. The `scrape` Typer command:
 
-1. Finds the newest existing `{eid}_*.json` file to determine the last known timestamp.
+1. Finds the newest existing `data/{eid}/{eid}_*.json` file to determine the last known timestamp.
 2. Polls `https://results.lavote.gov/ElectionResults/GetCounterData?electionID={eid}` on `--delay` interval.
 3. Saves a new JSON snapshot when the `TimeStamp` field in the response advances.
 4. Optionally plays `moo.mp3` (via `python-vlc`) and/or git-commits + pushes the new file.
@@ -43,6 +43,6 @@ The workflow (`.github/workflows/scrape.yml`) uses `concurrency: cancel-in-progr
 
 **GitHub Pages**: Served automatically from the `main` branch root. Enable in repo Settings → Pages → Source: Deploy from branch → `main` / `/ (root)`. No separate `gh-pages` branch needed.
 
-**index.json**: Maintained by the scraper. It is the manifest listing elections and result files. The `update_index()` and `backfill_index()` functions in `scrape.py` keep it current. When `--commit` is used, `index.json` is committed alongside each new result file.
+**index.json**: Maintained by the scraper and kept at the repo root. It is the manifest listing elections and result files; every path in it is relative to the repo root (e.g. `data/4338/4338_....json`). The `update_index()` and `backfill_index()` functions in `scrape.py` keep it current. When `--commit` is used, `index.json` is committed alongside each new result file.
 
 **Routing**: Hash-based. `#/` = contest index; `#/{eid}/{contestId}` = contest detail.

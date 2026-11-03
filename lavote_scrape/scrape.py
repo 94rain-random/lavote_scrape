@@ -17,6 +17,25 @@ _PACIFIC = ZoneInfo("America/Los_Angeles")
 app = Typer()
 
 FILE_NAME = "{eid}_{date}.json"
+DATA_DIR = Path("data")
+
+
+def data_dir(eid: int) -> Path:
+    """Directory holding all files for an election: data/<eid>/."""
+    d = DATA_DIR / str(eid)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def election_path(eid: int) -> str:
+    return str(data_dir(eid) / f"election_{eid}.json")
+
+
+def result_files(eid: int) -> list[str]:
+    """All result snapshots for an election, sorted by filename (= by time)."""
+    return sorted(glob(str(data_dir(eid) / f"{eid}_*.json")))
+
+
 moo_mp3 = Path(__file__).parent.parent / "moo.mp3"
 assert moo_mp3.exists()
 
@@ -60,7 +79,7 @@ def backfill_index(eid: int):
     index = json.loads(path.read_text()) if path.exists() else {}
     if str(eid) in index:
         return
-    meta_file = f"election_{eid}.json"
+    meta_file = election_path(eid)
     if not Path(meta_file).exists():
         return
     meta = json.loads(Path(meta_file).read_text())
@@ -71,7 +90,7 @@ def backfill_index(eid: int):
         election_date=data["Date"][:10],
         meta_file=meta_file,
     )
-    for f in sorted(glob(f"{eid}_*.json")):
+    for f in result_files(eid):
         update_index(eid, result_file=f)
 
 
@@ -130,7 +149,7 @@ def scrape(
     started = time.monotonic()
     last_timestamp = None
     last_data_hash = None
-    for f in sorted(glob(f"{eid}_*.json")):
+    for f in result_files(eid):
         try:
             with open(f) as fh:
                 data = json.load(fh)
@@ -147,14 +166,16 @@ def scrape(
         except Exception:
             pass
 
-    for meta in glob("election_*.json"):
+    for meta in glob(str(DATA_DIR / "*" / "election_*.json")):
         try:
-            existing_eid = int(meta.removeprefix("election_").removesuffix(".json"))
+            existing_eid = int(
+                Path(meta).name.removeprefix("election_").removesuffix(".json")
+            )
             backfill_index(existing_eid)
         except ValueError:
             pass
 
-    election_file = f"election_{eid}.json"
+    election_file = election_path(eid)
     if not Path(election_file).exists():
         election = requests.get(
             f"https://results.lavote.gov/ElectionResults/GetElectionData?electionID={eid}"
@@ -183,8 +204,11 @@ def scrape(
         )
         data_hash = hashlib.md5(json.dumps(cand_rows, sort_keys=True).encode()).hexdigest()
         if (not last_timestamp or timestamp > last_timestamp) and data_hash != last_data_hash:
-            filename = FILE_NAME.format(
-                eid=eid, date=str(datetime.now(_PACIFIC).replace(tzinfo=None))
+            filename = str(
+                data_dir(eid)
+                / FILE_NAME.format(
+                    eid=eid, date=str(datetime.now(_PACIFIC).replace(tzinfo=None))
+                )
             )
             with open(filename, "w") as f:
                 json.dump(results, f)
@@ -214,7 +238,7 @@ def turnout(
     """For each drop, write a CSV ranking contests by % turnout change vs the previous drop."""
     import csv
 
-    election_file = f"election_{eid}.json"
+    election_file = election_path(eid)
     if not Path(election_file).exists():
         print(f"Election metadata not found: {election_file}")
         raise SystemExit(1)
@@ -228,8 +252,8 @@ def turnout(
             for cand in contest.get("Candidates", []):
                 cand_to_contest[cand["ID"]] = contest["ID"]
 
-    result_files = sorted(glob(f"{eid}_*.json"))
-    if len(result_files) < 2:
+    files = result_files(eid)
+    if len(files) < 2:
         print("Need at least 2 drops to compute turnout change.")
         return
 
@@ -243,8 +267,8 @@ def turnout(
                     totals[cid] = totals.get(cid, 0.0) + row["Value"]
         return totals
 
-    prev_votes = contest_votes(result_files[0])
-    for path in result_files[1:]:
+    prev_votes = contest_votes(files[0])
+    for path in files[1:]:
         curr_votes = contest_votes(path)
 
         rows = []

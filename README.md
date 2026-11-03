@@ -8,7 +8,7 @@ Polls LA County election results and saves time-series snapshots as JSON. A GitH
 
 ## How it works
 
-The scraper hits the [LA County results API](https://results.lavote.gov) for a given election ID and saves a new snapshot whenever the server timestamp advances. Snapshots are named `{eid}_{datetime}.json` and committed to the repo root. An `index.json` manifest is kept in sync so the viewer always knows what files exist.
+The scraper hits the [LA County results API](https://results.lavote.gov) for a given election ID and saves a new snapshot whenever the server timestamp advances. Snapshots are named `{eid}_{datetime}.json` and committed under `data/{eid}/`. An `index.json` manifest is kept in sync so the viewer always knows what files exist.
 
 CI runs on the hour via GitHub Actions, cancels the previous run, and exits after ~65 minutes — so there is always exactly one active scrape during an election.
 
@@ -61,6 +61,6 @@ To scrape a different election long-term, update the `EID` default in the workfl
 
 | File | Contents |
 |---|---|
-| `election_{eid}.json` | Contest/candidate metadata from `GetElectionData` |
-| `{eid}_{datetime}.json` | Vote count snapshot from `GetCounterData` |
+| `data/{eid}/election_{eid}.json` | Contest/candidate metadata from `GetElectionData` |
+| `data/{eid}/{eid}_{datetime}.json` | Vote count snapshot from `GetCounterData` |
 | `index.json` | Scraper-maintained manifest of all elections and result files |
