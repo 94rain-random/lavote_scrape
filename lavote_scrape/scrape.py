@@ -203,7 +203,11 @@ def scrape(
             key=lambda r: r["ReferenceID"],
         )
         data_hash = hashlib.md5(json.dumps(cand_rows, sort_keys=True).encode()).hexdigest()
-        if (not last_timestamp or timestamp > last_timestamp) and data_hash != last_data_hash:
+        has_votes = any(r["Value"] for r in cand_rows)
+        if not has_votes:
+            # Before the first drop the counter returns all zeros; don't record that.
+            print(f"No votes reported yet (timestamp {timestamp}) — skipping.")
+        elif (not last_timestamp or timestamp > last_timestamp) and data_hash != last_data_hash:
             filename = str(
                 data_dir(eid)
                 / FILE_NAME.format(
