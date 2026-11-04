@@ -94,6 +94,8 @@
     "title": "General Election",
     "election_date": "2026-11-03",
     "meta_file": "data/4348/election_4348.json",
-    "result_files": []
+    "result_files": [
+      "data/4348/4348_2026-11-03 20:19:09.977264.json"
+    ]
   }
 }
